@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+env/
+venv/
+.venv/
+ENV/
+pip-wheel-metadata/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Samba app data (user-specific, generated at runtime)
+settings.json
+todos.json
+notes/
+*.md.bak
+
+# Whisper model cache (large, downloaded automatically on first run)
+.cache/
+mlx_models/
+huggingface/
+
+# App bundle (rebuilt via install.sh)
+dist/
+*.app/
+
+# Icons build artifacts
+*.iconset/
+samba.icns
+
+# Logs
+*.log
+logs/
+
+# Secrets / tokens — NEVER commit these
+.env
+*.env
+secrets.json
+notion_token.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage

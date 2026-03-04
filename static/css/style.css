@@ -1,0 +1,210 @@
+/* Tab styles */
+.tab-btn {
+  color: #94a3b8; /* slate-400 */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab-btn:hover {
+  color: #e2e8f0;
+}
+.tab-active {
+  color: #e2e8f0;
+  border-bottom-color: #4f72f0;
+}
+
+/* Record button states */
+.record-btn-idle {
+  background-color: #4f72f0;
+  color: #fff;
+  box-shadow: 0 0 0 0 rgba(79, 114, 240, 0);
+}
+.record-btn-idle:hover {
+  background-color: #3a5ce0;
+}
+.record-btn-recording {
+  background-color: #1e2538;
+  color: #f87171;
+  border: 1px solid #f87171;
+}
+.record-btn-recording:hover {
+  background-color: #252d44;
+}
+.record-btn-processing {
+  background-color: #1e2538;
+  color: #94a3b8;
+  border: 1px solid #475569;
+  cursor: not-allowed;
+}
+
+/* Waveform animation */
+.waveform-bar {
+  animation: wave 1s ease-in-out infinite alternate;
+  background-color: rgba(79, 114, 240, 0.6);
+}
+@keyframes wave {
+  0%   { height: 4px;  opacity: 0.4; }
+  100% { height: 28px; opacity: 1;   }
+}
+
+/* Transcript lines */
+.transcript-line {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #cbd5e1;
+  background: transparent;
+  transition: background 0.15s;
+}
+.transcript-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.transcript-line .timestamp {
+  font-size: 0.7rem;
+  color: #475569;
+  font-family: monospace;
+  margin-right: 8px;
+}
+
+/* Summary prose */
+.summary-body {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+}
+.summary-body p + p {
+  margin-top: 0.75rem;
+}
+
+/* Action item card */
+.action-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #1e2538;
+  border: 1px solid rgba(255,255,255,0.05);
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.action-item:hover {
+  border-color: rgba(79, 114, 240, 0.3);
+}
+.action-item input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: #4f72f0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.action-item label {
+  font-size: 0.875rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.action-item.done label {
+  text-decoration: line-through;
+  color: #475569;
+}
+
+/* Processing spinner */
+.processing-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #94a3b8;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Speaker labels in transcript */
+.speaker-you {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b8ef5;
+  margin-right: 6px;
+}
+.speaker-meeting {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #34d399;
+  margin-right: 6px;
+}
+
+/* Meeting detected pulse */
+.meeting-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* Settings panel */
+.settings-panel {
+  display: none;
+}
+.settings-panel.open {
+  display: block;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  min-width: 120px;
+}
+.settings-input {
+  flex: 1;
+  background: #1e2538;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.settings-input:focus {
+  border-color: #4f72f0;
+}
+.settings-input::placeholder {
+  color: #475569;
+}
+
+/* Summarizing spinner label */
+.summarizing-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2e3850; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4a6b; }
