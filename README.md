@@ -218,6 +218,27 @@ A Windows port is feasible but not planned — PRs welcome.
 
 ---
 
+## Notion Setup
+
+Notion is optional. If you want to push meeting notes to Notion:
+
+1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New integration**
+2. Give it a name (e.g. "Samba"), set type to **Internal**, click Save
+3. Copy the **Internal Integration Token** (starts with `secret_...`)
+4. Open the Notion page you want notes pushed into
+5. Click **⋯** (top-right) → **Connections** → search for your integration → click to connect
+6. Copy the **Page ID** from the page URL:
+   ```
+   https://notion.so/My-Meeting-Notes-2e2e48cc793580619b08c5762548c69e
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                        this is your Page ID
+   ```
+7. In Samba, click the **gear icon** → paste your token and page ID → Save
+
+Once configured, the **Send to Notion** button will push the full transcript, summary, and action items as a new sub-page.
+
+---
+
 ## Privacy
 
 - **Everything runs locally.** Audio never leaves your machine.
