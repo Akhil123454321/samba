@@ -10,11 +10,6 @@
   ![Notion](https://img.shields.io/badge/Notion-API-white?logo=notion)
 </div>
 
----
-
-> **Named after Samba** from the Telugu film *Magadheera* — whose entire job was to faithfully write down everything the hero said.
-
----
 
 ## Features
 
@@ -234,7 +229,7 @@ A Windows port is feasible but not planned — PRs welcome.
 
 ## License
 
-MIT
+© Akhil Sagaran Kasturi 2026
 
 ---
 
