@@ -51,7 +51,6 @@ dist/
 
 # Icons build artifacts
 *.iconset/
-samba.icns
 
 # Logs
 *.log
@@ -62,6 +61,9 @@ logs/
 *.env
 secrets.json
 notion_token.txt
+
+# Claude Code local memory
+.claude/
 
 # IDE
 .vscode/

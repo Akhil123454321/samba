@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import os
+import sys
 import json
 import subprocess
 import threading
@@ -9,18 +10,44 @@ import time
 import logging
 from datetime import datetime
 
+import re
+
 import numpy as np
 import sounddevice as sd
 import mlx_whisper
 import requests as http_requests
 import psutil
 
+# Optional: mlx-lm for built-in summarization (Apple Silicon)
+try:
+    from mlx_lm import load as mlx_lm_load, generate as mlx_lm_generate
+    _MLX_LM_AVAILABLE = True
+except ImportError:
+    _MLX_LM_AVAILABLE = False
+    logging.warning("mlx-lm not installed — mlx summarization disabled.")
+
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-app = Flask(__name__)
+# ── Path setup ─────────────────────────────────────────────────────────────────
+# When running as a PyInstaller bundle, templates/static are inside sys._MEIPASS.
+# User data (settings, todos, notes) always lives in ~/Library/Application Support/Samba
+# so it survives app updates and isn't lost when the bundle is replaced.
+if getattr(sys, "frozen", False):
+    _BUNDLE_DIR = sys._MEIPASS
+    _DATA_DIR = os.path.expanduser("~/Library/Application Support/Samba")
+    os.makedirs(_DATA_DIR, exist_ok=True)
+else:
+    _BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_BUNDLE_DIR, "templates"),
+    static_folder=os.path.join(_BUNDLE_DIR, "static"),
+)
 CORS(app)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = _BUNDLE_DIR
 
 # ── Audio config ───────────────────────────────────────────────────────────────
 BLACKHOLE_DEVICE = 2
@@ -42,10 +69,12 @@ HALLUCINATIONS = {
 MEETING_KEYWORDS = {"zoom", "teams", "webex", "chime"}
 
 # ── Settings ───────────────────────────────────────────────────────────────────
-SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+SETTINGS_FILE = os.path.join(_DATA_DIR, "settings.json")
 
 _default_settings = {
-    "notes_dir": os.path.join(BASE_DIR, "notes"),
+    "notes_dir": os.path.join(_DATA_DIR, "notes"),
+    "summarizer": "mlx",
+    "mlx_model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
     "ollama_model": "llama3.2",
     "ollama_url": "http://localhost:11434",
     "notion_token": "",
@@ -70,7 +99,7 @@ def _save_settings():
 settings = _load_settings()
 
 # ── Todos persistence ──────────────────────────────────────────────────────────
-TODOS_FILE = os.path.join(BASE_DIR, "todos.json")
+TODOS_FILE = os.path.join(_DATA_DIR, "todos.json")
 
 def _load_todos():
     if os.path.exists(TODOS_FILE):
@@ -165,24 +194,71 @@ def _clean_text(text):
     return t
 
 
-def _identify_speaker(bh_16k, mic_16k, start_s, end_s):
-    """Compare mic vs BlackHole energy in a segment window to label the speaker."""
-    if mic_16k is None:
-        return None
+def _rms_segment(audio, start_s, end_s):
     s = int(start_s * WHISPER_RATE)
     e = int(end_s * WHISPER_RATE)
-    bh_seg = bh_16k[s:e]
-    mic_seg = mic_16k[s:e]
-    if len(bh_seg) == 0 or len(mic_seg) == 0:
-        return None
-    bh_rms = float(np.sqrt(np.mean(bh_seg ** 2)))
-    mic_rms = float(np.sqrt(np.mean(mic_seg ** 2)))
-    # Require a clear energy difference to confidently label
-    if mic_rms > bh_rms * 1.8:
-        return "You"
-    if bh_rms > mic_rms * 1.5:
-        return "Meeting"
-    return None  # ambiguous — don't label
+    seg = audio[s:e]
+    if len(seg) == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(seg ** 2)))
+
+
+def _resolve_speaker(seg_start, seg_end, bh_16k, mic_16k):
+    """Return 'You', 'Meeting', or None based on mic vs BlackHole energy."""
+    if mic_16k is not None:
+        mic_rms = _rms_segment(mic_16k, seg_start, seg_end)
+        bh_rms  = _rms_segment(bh_16k,  seg_start, seg_end)
+        if mic_rms > bh_rms * 1.8:
+            return "You"
+        if bh_rms > mic_rms * 1.5:
+            return "Meeting"
+    return None
+
+
+# ── Pending line buffer (speaker-change-driven flushing) ──────────────────────
+# Accumulates one speaker's text across chunk boundaries until they stop talking.
+
+_pending = {"speaker": None, "text": "", "ts": "", "since": 0.0}
+MAX_PENDING_SECONDS = 30  # force-flush if a single speaker goes on for very long
+
+
+def _flush_pending():
+    if not _pending["text"].strip():
+        return
+    sp = _pending["speaker"]
+    line = (f"{_pending['ts']} {sp}: {_pending['text'].strip()}"
+            if sp else f"{_pending['ts']} {_pending['text'].strip()}")
+    state["transcript"] += line + "\n"
+    logging.info("Flushed: %s", line[:80])
+    _pending["speaker"] = None
+    _pending["text"] = ""
+    _pending["ts"] = ""
+    _pending["since"] = 0.0
+
+
+def _feed_pending(speaker, text, ts):
+    """Add a segment to the pending buffer, flushing if the speaker changes.
+    None-speaker segments (pyannote gap / ambiguous) are appended to whatever
+    is currently buffered rather than creating a stray fragment line."""
+    now = time.time()
+    timed_out = _pending["since"] > 0 and (now - _pending["since"]) > MAX_PENDING_SECONDS
+
+    # Treat None as "continue with current speaker" to avoid fragment lines
+    if speaker is None:
+        if _pending["text"]:
+            _pending["text"] += " " + text  # append to existing buffer silently
+        # else: discard — nothing to attach to yet
+        return
+
+    same_speaker = (speaker == _pending["speaker"])
+    if same_speaker and not timed_out:
+        _pending["text"] += " " + text
+    else:
+        _flush_pending()
+        _pending["speaker"] = speaker
+        _pending["text"] = text
+        _pending["ts"] = ts
+        _pending["since"] = now
 
 
 # ── Transcription worker ───────────────────────────────────────────────────────
@@ -235,28 +311,22 @@ def _transcription_worker():
             result = mlx_whisper.transcribe(mixed, path_or_hf_repo=MLX_MODEL)
 
             segments = result.get("segments", [])
-            lines = []
             for seg in segments:
                 text = _clean_text(seg.get("text", ""))
                 if not text:
                     continue
                 seg_start = seg.get("start", 0)
                 seg_end = seg.get("end", seg_start + 1)
-                speaker = _identify_speaker(bh_16k, mic_16k, seg_start, seg_end)
+                speaker = _resolve_speaker(seg_start, seg_end, bh_16k, mic_16k)
                 abs_s = chunk_offset + int(seg_start)
-                seg_ts = f"[{abs_s//3600:02d}:{(abs_s%3600)//60:02d}:{abs_s%60:02d}]"
-                if speaker:
-                    lines.append(f"{seg_ts} {speaker}: {text}")
-                else:
-                    lines.append(f"{seg_ts} {text}")
-                logging.info("%s", lines[-1])
-
-            if lines:
-                state["transcript"] += "\n".join(lines) + "\n"
+                ts = f"[{abs_s//3600:02d}:{(abs_s%3600)//60:02d}:{abs_s%60:02d}]"
+                _feed_pending(speaker, text, ts)
 
         except queue.Empty:
             continue
 
+    # Flush any remaining buffered text when recording stops
+    _flush_pending()
     logging.info("Transcription worker stopped.")
 
 
@@ -293,6 +363,87 @@ def _meeting_watcher():
 threading.Thread(target=_meeting_watcher, daemon=True).start()
 
 
+# ── Summarization ──────────────────────────────────────────────────────────────
+
+_mlx_lm_model = None
+_mlx_lm_tokenizer = None
+_mlx_lm_name = None
+_mlx_lm_lock = threading.Lock()
+
+_SUMMARIZE_PROMPT = (
+    "You are a meeting assistant. Analyze this transcript and return ONLY valid JSON "
+    "with two fields: \"summary\" (a concise 2-3 paragraph summary as a string) and "
+    "\"action_items\" (a JSON array of strings). "
+    "For action_items: ONLY include tasks, assignments, or follow-ups that were EXPLICITLY "
+    "mentioned or agreed upon in the conversation. Do NOT invent or infer items not directly stated. "
+    "If no action items were discussed, return an empty array []. "
+    "No markdown, no explanation outside the JSON.\n\nTranscript:\n"
+)
+
+
+def _ensure_mlx_model(model_name):
+    global _mlx_lm_model, _mlx_lm_tokenizer, _mlx_lm_name
+    with _mlx_lm_lock:
+        if _mlx_lm_name == model_name and _mlx_lm_model is not None:
+            return True
+        try:
+            logging.info("Loading mlx-lm model: %s", model_name)
+            _mlx_lm_model, _mlx_lm_tokenizer = mlx_lm_load(model_name)
+            _mlx_lm_name = model_name
+            logging.info("mlx-lm model loaded.")
+            return True
+        except Exception as exc:
+            logging.error("Failed to load mlx-lm model %s: %s", model_name, exc)
+            return False
+
+
+def _summarize_with_mlx(transcript):
+    model_name = settings.get("mlx_model", _default_settings["mlx_model"])
+    if not _ensure_mlx_model(model_name):
+        raise RuntimeError(f"Could not load mlx-lm model: {model_name}")
+    prompt_text = _SUMMARIZE_PROMPT + transcript
+    messages = [{"role": "user", "content": prompt_text}]
+    if hasattr(_mlx_lm_tokenizer, "apply_chat_template") and _mlx_lm_tokenizer.chat_template is not None:
+        formatted = _mlx_lm_tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    else:
+        formatted = prompt_text
+    with _mlx_lm_lock:
+        raw = mlx_lm_generate(
+            _mlx_lm_model, _mlx_lm_tokenizer,
+            prompt=formatted, max_tokens=1024, verbose=False,
+        )
+    text = raw.strip()
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        text = m.group(0)
+    return json.loads(text)
+
+
+def _summarize_with_ollama(transcript):
+    model = settings["ollama_model"]
+    url = f"{settings['ollama_url']}/api/generate"
+    prompt = _SUMMARIZE_PROMPT + transcript
+    resp = http_requests.post(
+        url,
+        json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return json.loads(resp.json().get("response", "{}"))
+
+
+def _summarize(transcript):
+    """Dispatch to the configured summarization backend (mlx or ollama)."""
+    backend = settings.get("summarizer", "mlx")
+    if backend == "ollama":
+        return _summarize_with_ollama(transcript)
+    if not _MLX_LM_AVAILABLE:
+        raise RuntimeError("mlx-lm not installed. Run: pip install mlx-lm")
+    return _summarize_with_mlx(transcript)
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -312,6 +463,7 @@ def start_recording():
     state["meeting_title"] = data.get("title", "Untitled Meeting")
     state["started_at"] = datetime.now().isoformat()
     state.pop("_auto_action", None)
+    _pending.update(speaker=None, text="", ts="", since=0.0)  # clear line buffer
 
     _stop_event.clear()
     for q in (_bh_queue, _mic_queue):
@@ -358,25 +510,7 @@ def stop_recording():
             logging.info("Auto-summarizing...")
             state["summarizing"] = True
             try:
-                model = settings["ollama_model"]
-                url = f"{settings['ollama_url']}/api/generate"
-                prompt = (
-                    "You are a meeting assistant. Analyze this transcript and return ONLY valid JSON "
-                    "with two fields: \"summary\" (a concise 2-3 paragraph summary as a string) and "
-                    "\"action_items\" (a JSON array of strings). "
-                    "For action_items: ONLY include tasks, assignments, or follow-ups that were EXPLICITLY mentioned or agreed upon in the conversation. "
-                    "Do NOT invent, infer, or suggest items that were not directly stated. "
-                    "If no action items were discussed, return an empty array []. "
-                    "No markdown, no explanation outside the JSON.\n\n"
-                    f"Transcript:\n{state['transcript']}"
-                )
-                resp = http_requests.post(
-                    url,
-                    json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
-                    timeout=120,
-                )
-                resp.raise_for_status()
-                result = json.loads(resp.json().get("response", "{}"))
+                result = _summarize(state["transcript"])
                 state["summary"] = result.get("summary", "")
                 state["action_items"] = result.get("action_items", [])
                 logging.info("Auto-summary done.")
@@ -447,22 +581,7 @@ def generate_summary():
     def _run():
         state["summarizing"] = True
         try:
-            model = settings["ollama_model"]
-            url = f"{settings['ollama_url']}/api/generate"
-            prompt = (
-                "You are a meeting assistant. Analyze this transcript and return ONLY valid JSON "
-                "with two fields: \"summary\" (a concise 2-3 paragraph summary as a string) and "
-                "\"action_items\" (a JSON array of specific task strings). "
-                "No markdown, no explanation outside the JSON.\n\n"
-                f"Transcript:\n{state['transcript']}"
-            )
-            resp = http_requests.post(
-                url,
-                json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
-                timeout=120,
-            )
-            resp.raise_for_status()
-            result = json.loads(resp.json().get("response", "{}"))
+            result = _summarize(state["transcript"])
             state["summary"] = result.get("summary", "")
             state["action_items"] = result.get("action_items", [])
             logging.info("Summary generated.")
@@ -484,7 +603,7 @@ def get_settings():
 @app.route("/api/settings", methods=["POST"])
 def update_settings():
     data = request.get_json()
-    for key in ("notes_dir", "ollama_model", "ollama_url", "notion_token", "notion_parent_id", "auto_start"):
+    for key in ("notes_dir", "summarizer", "mlx_model", "ollama_model", "ollama_url", "notion_token", "notion_parent_id", "auto_start"):
         if key in data:
             settings[key] = data[key]
     _save_settings()

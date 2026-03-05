@@ -51,7 +51,8 @@ async function stopRecording() {
     setStatusBadge("Completed", "green");
     showExportBar();
 
-    // Poll until summary arrives (auto-summary has a 3s delay before it starts)
+    // Wait briefly for the worker to flush its pending line buffer, then fetch
+    await new Promise(r => setTimeout(r, 500));
     await fetchStatus();
     state.summaryPollInterval = setInterval(async () => {
       const res = await fetch("/api/status");
@@ -189,8 +190,11 @@ async function fetchStatus() {
     if (data.summarizing) {
       const sc = document.getElementById("summary-content");
       if (!sc.querySelector(".summarizing-label")) {
+        const backendLabel = state._summarizer === "ollama"
+          ? (state._ollamaModel || "Ollama")
+          : "MLX";
         sc.innerHTML = `<div class="summarizing-label py-12 justify-center">
-          <span class="processing-spinner"></span> Generating summary with ${state._ollamaModel || "Ollama"}…
+          <span class="processing-spinner"></span> Generating summary with ${backendLabel}…
         </div>`;
       }
     }
@@ -209,6 +213,17 @@ async function fetchStatus() {
 }
 
 // ── Render Functions ─────────────────────────────────────────────────────────
+// Colour palette for Speaker N labels (cycles if > 4 speakers)
+const SPEAKER_COLORS = ["speaker-s1", "speaker-s2", "speaker-s3", "speaker-s4"];
+
+function getSpeakerClass(speaker) {
+  if (speaker === "You") return "speaker-you";
+  if (speaker === "Meeting") return "speaker-meeting";
+  // Speaker 1, Speaker 2, … → pick from palette
+  const num = parseInt(speaker.replace("Speaker ", ""), 10) || 1;
+  return SPEAKER_COLORS[(num - 1) % SPEAKER_COLORS.length];
+}
+
 function renderTranscript(text) {
   const container = document.getElementById("transcript-content");
   if (!text) return;
@@ -219,14 +234,14 @@ function renderTranscript(text) {
     const div = document.createElement("div");
     div.className = "transcript-line";
 
-    // Try [HH:MM:SS] Speaker: text
-    const speakerMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(You|Meeting):\s*(.*)/);
+    // [HH:MM:SS] <speaker>: text  — speaker can be "You", "Meeting", or "Speaker N"
+    const speakerMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(You|Meeting|Speaker \d+):\s*(.*)/);
     if (speakerMatch) {
       const [, ts, speaker, content] = speakerMatch;
-      const cls = speaker === "You" ? "speaker-you" : "speaker-meeting";
+      const cls = getSpeakerClass(speaker);
       div.innerHTML = `<span class="timestamp">${ts}</span><span class="${cls}">${escapeHtml(speaker)}</span>${escapeHtml(content)}`;
     } else {
-      // Fallback: plain [HH:MM:SS] text
+      // Fallback: plain [HH:MM:SS] text (no speaker label)
       const tsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/);
       if (tsMatch) {
         div.innerHTML = `<span class="timestamp">${tsMatch[1]}</span>${escapeHtml(tsMatch[2])}`;
@@ -381,17 +396,23 @@ async function loadSettings() {
     const res = await fetch("/api/settings");
     const data = await res.json();
     document.getElementById("notes-dir").value = data.notes_dir || "";
+    document.getElementById("summarizer").value = data.summarizer || "mlx";
+    document.getElementById("mlx-model").value = data.mlx_model || "";
     document.getElementById("ollama-model").value = data.ollama_model || "";
     document.getElementById("notion-token").value = data.notion_token || "";
     document.getElementById("notion-parent-id").value = data.notion_parent_id || "";
     document.getElementById("auto-start").checked = !!data.auto_start;
+    state._summarizer = data.summarizer || "mlx";
     state._ollamaModel = data.ollama_model;
+    toggleSummarizerFields();
   } catch {}
 }
 
 async function saveSettings() {
   const payload = {
     notes_dir: document.getElementById("notes-dir").value.trim(),
+    summarizer: document.getElementById("summarizer").value,
+    mlx_model: document.getElementById("mlx-model").value.trim(),
     ollama_model: document.getElementById("ollama-model").value.trim(),
     notion_token: document.getElementById("notion-token").value.trim(),
     notion_parent_id: document.getElementById("notion-parent-id").value.trim(),
@@ -403,12 +424,19 @@ async function saveSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    state._summarizer = payload.summarizer;
     state._ollamaModel = payload.ollama_model;
     showToast("Settings saved", "success");
     toggleSettings();
   } catch {
     showToast("Failed to save settings", "error");
   }
+}
+
+function toggleSummarizerFields() {
+  const val = document.getElementById("summarizer").value;
+  document.getElementById("mlx-model-row").style.display = val === "mlx" ? "" : "none";
+  document.getElementById("ollama-model-row").style.display = val === "ollama" ? "" : "none";
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -434,9 +462,12 @@ async function requestSummary() {
       showToast("No transcript to summarize yet", "error");
       return;
     }
-    showToast("Generating summary with Ollama…", "info");
+    const backendLabel = state._summarizer === "ollama"
+      ? (state._ollamaModel || "Ollama")
+      : "MLX";
+    showToast(`Generating summary with ${backendLabel}…`, "info");
   } catch {
-    showToast("Could not reach Ollama", "error");
+    showToast("Could not start summarization", "error");
   }
 }
 

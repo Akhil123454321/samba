@@ -113,7 +113,18 @@
 
 ## Installation
 
-### Quick Install (recommended)
+### Option 1 — Download the app (easiest)
+
+1. Go to the [Releases](https://github.com/YOUR_USERNAME/samba/releases) page
+2. Download `Samba.dmg` from the latest release
+3. Open the `.dmg` and drag **Samba.app** into `/Applications`
+4. **First launch:** right-click → **Open** → click Open in the dialog
+
+> The right-click → Open step is required because Samba is not notarized with an Apple Developer certificate. macOS Gatekeeper will block a normal double-click the first time. After that, it opens like any other app.
+
+### Option 2 — Build from source
+
+**Prerequisites:** Python 3.10+, BlackHole 2ch, Ollama
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/samba.git
@@ -129,7 +140,7 @@ The installer will:
 - Pre-download the Whisper model
 - Install `Samba.app` to `/Applications`
 
-### Manual Install
+### Option 3 — Run without building
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/samba.git

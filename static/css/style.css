@@ -125,22 +125,16 @@
 }
 
 /* Speaker labels in transcript */
-.speaker-you {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b8ef5;
-  margin-right: 6px;
-}
+.speaker-you,
 .speaker-meeting {
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #34d399;
   margin-right: 6px;
 }
+.speaker-you     { color: #6b8ef5; } /* blue  — the user */
+.speaker-meeting { color: #34d399; } /* green — meeting audio */
 
 /* Meeting detected pulse */
 .meeting-dot {

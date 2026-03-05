@@ -136,6 +136,19 @@
       </div>
 
       <div class="settings-row">
+        <span class="settings-label">Summarizer</span>
+        <select id="summarizer" onchange="toggleSummarizerFields()" class="settings-input">
+          <option value="mlx">MLX — built-in, Apple Silicon</option>
+          <option value="ollama">Ollama — requires local server</option>
+        </select>
+      </div>
+
+      <div id="mlx-model-row" class="settings-row">
+        <span class="settings-label">MLX model</span>
+        <input id="mlx-model" type="text" placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit" class="settings-input" />
+      </div>
+
+      <div id="ollama-model-row" class="settings-row" style="display:none">
         <span class="settings-label">Ollama model</span>
         <input id="ollama-model" type="text" placeholder="llama3.2" class="settings-input" />
       </div>
